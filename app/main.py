@@ -2,6 +2,7 @@
 import chromadb
 import logging
 from fastapi import FastAPI, HTTPException, Body, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from . import config, preprocessing, querying, models # Relative imports
 
 # Configure logging
@@ -14,6 +15,26 @@ app = FastAPI(
     description="API for preprocessing documents and querying them using a RAG pipeline.",
     version="1.0.0",
 )
+
+# --- CORS Configuration ---
+# Define the list of origins allowed to connect (your Vue frontend)
+# IMPORTANT: Use the specific origin in production, '*' is less secure
+origins = [
+    "http://localhost:5173", # Your Vue frontend origin
+    "http://127.0.0.1:5173", # Sometimes needed depending on browser/OS
+    # Add your deployed frontend URL here later if applicable
+    # e.g., "https://your-frontend-domain.com"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins, # List of allowed origins
+    allow_credentials=True, # Allow cookies/auth headers
+    allow_methods=["*"],    # Allow all methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],    # Allow all headers
+)
+# --- End CORS Configuration ---
+
 
 # --- Dependency for Configuration ---
 # This allows overriding config via request body if needed, otherwise uses .env defaults
