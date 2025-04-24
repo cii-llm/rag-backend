@@ -19,7 +19,17 @@ LLM_MODEL="gpt-3.5-turbo" # or "gpt-4" if you have access
 EMBEDDING_MODEL="text-embedding-ada-002"
 ```
 
+
+## Build Virtualenv
+```
+virtualenv env
+source ./env/bin/activate
+pip3 install -r requirements.txt
+```
+
 ## Running RAG LLM
+
+`python3 run.py`
 
 ### API
 Preprocess
