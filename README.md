@@ -33,7 +33,7 @@ pip3 install -r requirements.txt
 
 ### API
 Preprocess
-`curl -X POST -H "Content-Type: application/json" -d "{}" http://localhost:8000/preprocess  `
+`curl -X POST -H "Content-Type: application/json" -d "{}" http://localhost:8000/preprocess`
 
 Query
 `curl -X POST -H "Content-Type: application/json" -d '{"query": "What is CII?"}' http://localhost:8000/query`
