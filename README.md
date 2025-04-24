@@ -18,3 +18,12 @@ LLM_MODEL="gpt-3.5-turbo" # or "gpt-4" if you have access
 # OpenAI Embedding Model (or choose another like "text-embedding-3-small", etc.)
 EMBEDDING_MODEL="text-embedding-ada-002"
 ```
+
+## Running RAG LLM
+
+### API
+Preprocess
+`curl -X POST -H "Content-Type: application/json" -d "{}" http://localhost:8000/preprocess  `
+
+Query
+`curl -X POST -H "Content-Type: application/json" -d '{"query": "What is CII?"}' http://localhost:8000/query`

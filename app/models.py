@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 class PreprocessRequest(BaseModel):
     # Optional: Allow specifying folder/collection via API, otherwise use .env defaults
@@ -20,3 +20,8 @@ class QueryResponse(BaseModel):
     query: str
     answer: str
     source_nodes_count: int # Example metadata, LlamaIndex response has more
+
+class ProcessedDocumentsResponse(BaseModel):
+    collection_name: str
+    processed_filenames: List[str]
+    count: int

@@ -1,3 +1,5 @@
+      
+import chromadb
 import logging
 from fastapi import FastAPI, HTTPException, Body, Depends
 from . import config, preprocessing, querying, models # Relative imports
@@ -106,3 +108,76 @@ async def query_endpoint(request: models.QueryRequest):
 @app.get("/", summary="Health Check", description="Basic health check endpoint.")
 async def root():
     return {"status": "ok", "message": "RAG API is running"}
+
+
+@app.get("/processed_documents",
+         response_model=models.ProcessedDocumentsResponse,
+         summary="List Processed Documents",
+         description="Retrieves a list of unique source filenames stored in the specified ChromaDB collection.")
+async def get_processed_documents(collection_name: str | None = None):
+    """
+    Queries ChromaDB to find unique source filenames that have been processed.
+    Uses db.list_collections() to check for existence first.
+    """
+    collection_to_check = collection_name or config.COLLECTION_NAME
+    persist_dir_to_use = str(config.PERSIST_DIR)
+    logger.info(f"Request received to list processed documents in collection: '{collection_to_check}'")
+
+    processed_files: Set[str] = set()
+    collection_exists = False
+
+    try:
+        # Initialize ChromaDB client
+        db = chromadb.PersistentClient(path=persist_dir_to_use)
+
+        # Check if collection exists by listing all collections
+        try:
+            logger.debug(f"Listing collections to check for '{collection_to_check}'.")
+            collections = db.list_collections()
+            collection_names = {col.name for col in collections}
+            if collection_to_check in collection_names:
+                collection_exists = True
+                logger.debug(f"Collection '{collection_to_check}' confirmed to exist.")
+            else:
+                 logger.info(f"Collection '{collection_to_check}' does not exist.")
+                 # If collection doesn't exist, return empty list immediately
+                 return models.ProcessedDocumentsResponse(
+                     collection_name=collection_to_check,
+                     processed_filenames=[],
+                     count=0
+                 )
+        except Exception as e:
+            logger.error(f"Error listing collections from ChromaDB: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to query vector store collections.")
+
+        # If collection exists, get its metadata
+        if collection_exists:
+            try:
+                logger.debug(f"Fetching metadata from existing collection '{collection_to_check}'.")
+                collection = db.get_collection(name=collection_to_check)
+                results = collection.get(include=['metadatas']) # Only fetch metadata
+                logger.info(f"Retrieved metadata for {len(results.get('ids', []))} chunks from '{collection_to_check}'.")
+
+                if results and results.get('metadatas'):
+                    for metadata in results['metadatas']:
+                        if metadata and 'file_name' in metadata:
+                            processed_files.add(metadata['file_name'])
+
+            except Exception as e:
+                # Catch errors during the .get() call itself
+                logger.error(f"Error retrieving metadata from collection '{collection_to_check}': {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to retrieve metadata from collection '{collection_to_check}'.")
+
+        # Convert set to sorted list for consistent output
+        sorted_filenames = sorted(list(processed_files))
+
+        return models.ProcessedDocumentsResponse(
+            collection_name=collection_to_check,
+            processed_filenames=sorted_filenames,
+            count=len(sorted_filenames)
+        )
+
+    except Exception as e:
+        # Catch broader errors like DB connection issues
+        logger.exception(f"An unexpected error occurred while listing processed documents for collection '{collection_to_check}': {e}")
+        raise HTTPException(status_code=500, detail=f"An internal server error occurred. Check logs. Error: {str(e)}")

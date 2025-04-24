@@ -1,9 +1,13 @@
 import logging
 import chromadb
+
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext, Settings
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.embeddings.openai import OpenAIEmbedding # Use specific embedding class
-from . import config # Use relative import within the package
+from llama_index.embeddings.openai import OpenAIEmbedding
+from . import config
+import os # Import os for path manipulation
+from pathlib import Path # Import Path for easier path handling
+from typing import Set, List # Import Set and List
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -23,65 +27,123 @@ def setup_global_settings():
     logger.info(f"Global Settings configured with Embedding Model: {config.EMBEDDING_MODEL}")
 
 
+
+def get_processed_filenames(db_client: chromadb.PersistentClient, collection_name: str) -> Set[str]:
+    """
+    Helper function to get unique filenames already processed in a collection.
+    Uses db.list_collections() to check for existence first.
+    """
+    processed_files: Set[str] = set()
+    collection_exists = False
+    try:
+        # Get list of all collection objects
+        collections = db_client.list_collections()
+        # Check if our collection name is in the list of names
+        collection_names = {col.name for col in collections}
+        if collection_name in collection_names:
+            collection_exists = True
+            logger.info(f"Collection '{collection_name}' found.")
+        else:
+            logger.info(f"Collection '{collection_name}' not found in the database.")
+
+    except Exception as e:
+        logger.error(f"Error listing collections from ChromaDB: {e}", exc_info=True)
+        # If we can't even list collections, assume we can't get processed files
+        return processed_files # Return empty set
+
+    # If the collection exists, proceed to get metadata
+    if collection_exists:
+        try:
+            collection = db_client.get_collection(name=collection_name)
+            # Fetch only metadata, potentially optimize if collection is huge
+            results = collection.get(include=['metadatas'])
+            if results and results.get('metadatas'):
+                for metadata in results['metadatas']:
+                    if metadata and 'file_name' in metadata:
+                        processed_files.add(metadata['file_name'])
+            logger.info(f"Found {len(processed_files)} unique filenames already in collection '{collection_name}'.")
+        except Exception as e:
+            # Catch potential errors during .get() even if collection exists
+            logger.error(f"Error retrieving metadata from existing collection '{collection_name}': {e}", exc_info=True)
+            # Return empty set as we couldn't reliably get the data
+            return set()
+    # If collection didn't exist, processed_files is still the initial empty set
+    return processed_files
+
+# --- process_and_store_documents function remains the same ---
+# It now uses the updated get_processed_filenames helper.
+
+# Make sure the rest of process_and_store_documents is unchanged from the previous version
+# (setup_global_settings, finding files, filtering new files, loading, storing)
 def process_and_store_documents(data_folder: str, collection_name: str, persist_dir: str) -> int:
-    """
-    Loads documents from a folder, processes them, and stores them in ChromaDB.
-
-    Args:
-        data_folder: The path to the folder containing documents.
-        collection_name: The name of the ChromaDB collection.
-        persist_dir: The directory to persist ChromaDB data.
-
-    Returns:
-        The number of documents processed.
-    """
     setup_global_settings() # Ensure embedding model is set
 
-    logger.info(f"Starting document processing from folder: {data_folder}")
+    logger.info(f"Starting INCREMENTAL document processing from folder: {data_folder}")
     logger.info(f"Using ChromaDB collection: {collection_name} in {persist_dir}")
 
-    # Supported file types by SimpleDirectoryReader with necessary extras installed
-    required_exts = [".pdf", ".xlsx"]
+    # Initialize ChromaDB client
+    db = chromadb.PersistentClient(path=persist_dir)
+
+    # --- Get list of already processed files using the updated helper ---
+    processed_filenames = get_processed_filenames(db, collection_name)
+    # ---
+
+    # --- Find files in the data directory ---
+    input_dir = Path(data_folder)
+    all_files_in_folder: List[Path] = []
+    required_exts = [".pdf", ".xlsx"] # Keep required extensions
+
+    for ext in required_exts:
+        # Use rglob for recursive search
+        all_files_in_folder.extend(list(input_dir.rglob(f'*{ext}')))
+        all_files_in_folder.extend(list(input_dir.rglob(f'*{ext.upper()}'))) # Include uppercase extensions
+
+    if not all_files_in_folder:
+        logger.warning(f"No files with extensions {required_exts} found in {data_folder} (recursive).")
+        return 0
+
+    # --- Filter for NEW files only ---
+    new_files_to_process: List[str] = []
+    for file_path in all_files_in_folder:
+        if file_path.name not in processed_filenames:
+            new_files_to_process.append(str(file_path))
+
+    if not new_files_to_process:
+        logger.info(f"No new documents found in {data_folder} to process. Collection '{collection_name}' is up-to-date.")
+        return 0
+
+    logger.info(f"Found {len(new_files_to_process)} new file(s) to process: {new_files_to_process}")
+    # ---
+
+    # --- Load ONLY the new documents ---
     reader = SimpleDirectoryReader(
-        input_dir=data_folder,
-        required_exts=required_exts,
-        recursive=True, # Process subdirectories as well
+        input_files=new_files_to_process,
     )
 
     try:
         documents = reader.load_data()
         if not documents:
-            logger.warning(f"No documents found in {data_folder} with extensions {required_exts}")
+            logger.warning(f"Loaded 0 document chunks from the new files list. Check reader compatibility.")
             return 0
-        logger.info(f"Loaded {len(documents)} document chunks.") # Note: LlamaIndex splits docs into chunks
+        logger.info(f"Loaded {len(documents)} document chunks from {len(new_files_to_process)} new file(s).")
     except Exception as e:
-        logger.error(f"Error loading documents from {data_folder}: {e}", exc_info=True)
+        logger.error(f"Error loading new documents: {e}", exc_info=True)
         raise
 
-    # Initialize ChromaDB client
-    db = chromadb.PersistentClient(path=persist_dir)
-
-    # Get or create the Chroma collection
-    logger.info(f"Accessing ChromaDB collection: {collection_name}")
-    chroma_collection = db.get_or_create_collection(collection_name)
+    # --- Index and Store the new documents ---
+    logger.info(f"Accessing ChromaDB collection: {collection_name} to add new documents.")
+    chroma_collection = db.get_or_create_collection(collection_name) # get_or_create is safe
     logger.info(f"Collection '{collection_name}' accessed/created successfully.")
 
-    # Create a LlamaIndex vector store wrapper around the Chroma collection
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-
-    # Create a storage context using the vector store
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    # Create the index - this processes documents and stores embeddings in ChromaDB
-    # Uses the globally set embedding model via Settings
-    logger.info("Creating/updating vector store index...")
+    logger.info("Adding new documents to the vector store index...")
     index = VectorStoreIndex.from_documents(
         documents,
         storage_context=storage_context,
-        show_progress=True # Show progress bar in console
+        show_progress=True
     )
-    logger.info(f"Successfully created/updated index for collection '{collection_name}'.")
+    logger.info(f"Successfully added {len(documents)} chunks from new documents to collection '{collection_name}'.")
 
-    # Persistence is handled by ChromaDB PersistentClient, no extra index.persist needed here
-
-    return len(documents) # Return the number of loaded document chunks
+    return len(documents)
