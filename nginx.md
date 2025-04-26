@@ -7,7 +7,7 @@
           
 > Example using scp (run from your local machine)
 
-`scp -r /path/to/your/local/rag-frontend/dist/* your_user@167.172.26.90:/var/www/rag-frontend/dist/`
+`scp -r /path/to/your/local/rag-frontend/dist/* your_user@129.212.132.41:/var/www/rag-frontend/dist/`
 
 Ensure the web server user (often www-data on Debian/Ubuntu) has read permissions for these files.
 
@@ -17,15 +17,38 @@ sudo chown -R www-data:www-data /var/www/rag-frontend/dist
 sudo find /var/www/rag-frontend/dist -type d -exec chmod 755 {} \;
 sudo find /var/www/rag-frontend/dist -type f -exec chmod 644 {} \;
 ```
+
+Firewall Configuration
+
+    Goal: Allow incoming HTTPS (port 443) and HTTP (port 80, needed for Certbot validation) traffic.
+
+    Run these commands on your server (129.212.132.41):
+
+
+```  
+# Assuming you are using ufw (common on Ubuntu/Debian)
+sudo ufw allow 80/tcp   # Allow HTTP
+sudo ufw allow 443/tcp  # Allow HTTPS
+# Or use the Nginx Full profile which includes both
+# sudo ufw allow 'Nginx Full'
+sudo ufw reload
+sudo ufw status # Verify rules are active
+```
+        
     
 2. Create Nginx Server Block Configuration:
 
+
+Install Certbot and Nginx Plugin
+
+```
+sudo apt update # Or your distro's equivalent package manager update command
+sudo apt install certbot python3-certbot-nginx -y
+```   
+
 Create a new Nginx configuration file for your site. Conventionally, this goes in /etc/nginx/sites-available/.
 
-          
 `sudo nano /etc/nginx/sites-available/rag-frontend`
-
-
 
 ```      
 server {
@@ -33,7 +56,7 @@ server {
     listen [::]:80; # Listen on IPv6 as well
 
     # Replace with your actual server IP or domain name if you have one
-    server_name 167.172.26.90;
+    server_name cii.tektos-ai.com;
 
     # === Frontend Files ===
     # Set the root directory to your Vue app's build output
@@ -120,6 +143,24 @@ Apply the changes by reloading the Nginx service:
 
 (Use sudo systemctl restart nginx if reload doesn't work for some reason).
 
+Run Certbot to Obtain Certificate and Configure Nginx
+          
+`sudo certbot --nginx -d cii.tektos-ai.com`
+
+
+If successful, Certbot will confirm it obtained the certificate and modified your Nginx configuration (/etc/nginx/sites-available/rag-frontend).
+
+Always test your Nginx configuration before reloading:
+          
+`sudo nginx -t`
+
+Apply the changes by reloading the Nginx service:
+
+`sudo systemctl reload nginx`
+
+
+
+
 6. Update Frontend API URL:
 
 Crucially, your Vue frontend now needs to send API requests to /api/... instead of directly to port 8000, because Nginx is handling the routing.
@@ -129,12 +170,8 @@ File: rag-frontend/.env.production (or .env if you don't have environment-specif
 Change: Update VITE_API_BASE_URL.
 
 ```          
-# .env.production
-
-# Point to the Nginx proxy path, NOT directly to port 8000
-# Use the server's public IP or domain name
-VITE_API_BASE_URL=http://167.172.26.90/api
-# If you set up HTTPS later, change to https://
+# Use HTTPS and your domain name
+VITE_API_BASE_URL=https://cii.tektos-ai.com/api
 
 VITE_APP_TITLE="CII LLM RAG"
 ```
@@ -147,23 +184,22 @@ Rebuild: You must rebuild your frontend after changing environment variables:
 `npm run build`
  
 Re-upload: Upload the new contents of the dist folder to your server, replacing the old ones.
-
-7. Firewall:
-
-Ensure your server's firewall allows incoming traffic on port 80 (HTTP).
-
-```
-# Example using ufw (Ubuntu/Debian)
-sudo ufw allow 80/tcp
-sudo ufw allow 'Nginx HTTP' # Often predefined rule
-sudo ufw reload
-```
         
 
 8. Verify:
 
-Open your browser and navigate to http://167.172.26.90. You should see your Vue application load.
-
-Try using the chat interface. Open the browser's Developer Tools (F12) and check the "Network" tab. You should see requests going to http://167.172.26.90/api/query (or similar) and receiving successful responses (Status 200 OK).
+Open your browser and navigate to https://cii.tektos-ai.com. You should see your Vue application load.
 
 Now, Nginx serves your static Vue app files and forwards any requests starting with /api/ to your backend application running on port 8000.
+
+9. Backend:
+
+    Backend .env: No changes required based on the current configuration.
+
+    Backend run.py: Ensure host is set to 0.0.0.0.
+
+    Backend app/main.py: Ensure CORSMiddleware origins list includes https://cii.tektos-ai.com. 
+
+    Frontend .env.production: Ensure VITE_API_BASE_URL is set to https://cii.tektos-ai.com/api. 
+
+    Nginx Configuration: Ensure it proxies /api/ to http://127.0.0.1:8000 and handles HTTPS correctly.

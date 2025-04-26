@@ -29,8 +29,45 @@ pip3 install -r requirements.txt
 
 ## Running RAG LLM
 
-`python3 run.py`
+```
+      
+screen -S rag_backend
 
+source env/bin/activate
+python run.py >> backend.log 2>&1
+```
+
+Detach from the screen Session:
+    Press Ctrl+A, then release the keys, and then press d (for detach).
+    You will see [detached from ... .rag_backend] and be returned to your normal shell prompt. The run.py process continues running inside the detached screen session. You can now safely disconnect your SSH session.
+
+How to Manage the Session and Logs:
+
+List Running screen Sessions:
+
+`screen -ls`
+
+You should see your session listed, e.g., ... .rag_backend (Detached).
+
+Reattach to the Session:
+
+`screen -r rag_backend`
+
+(If you only have one detached session, screen -r might be enough). You'll be back inside the screen where the process is running.
+
+Stop the Backend Process:
+
+Reattach to the session: `screen -r rag_backend`
+
+Press Ctrl+C to send an interrupt signal to the running Python process (Uvicorn should catch this and shut down gracefully).
+
+Once the process stops, you can type exit and press Enter to terminate the screen session itself.
+
+Kill the Session (if reattaching and Ctrl+C doesn't work):
+      
+`screen -X -S rag_backend quit`
+
+    
 ### API
 Preprocess
 `curl -X POST -H "Content-Type: application/json" -d "{}" http://localhost:8000/preprocess`
