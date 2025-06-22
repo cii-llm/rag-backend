@@ -1,7 +1,10 @@
       
 import chromadb
 import logging
-from fastapi import FastAPI, HTTPException, Body, Depends
+import os
+import shutil
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, Body, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from . import config, preprocessing, querying, models # Relative imports
 
@@ -202,3 +205,133 @@ async def get_processed_documents(collection_name: str | None = None):
         # Catch broader errors like DB connection issues
         logger.exception(f"An unexpected error occurred while listing processed documents for collection '{collection_to_check}': {e}")
         raise HTTPException(status_code=500, detail=f"An internal server error occurred. Check logs. Error: {str(e)}")
+
+
+@app.post("/upload_file",
+          response_model=models.FileUploadResponse,
+          summary="Upload File",
+          description="Uploads a file to the data folder and optionally processes it into the vector store.")
+async def upload_file(
+    file: UploadFile = File(...),
+    process_immediately: bool = True,
+    collection_name: str | None = None
+):
+    """
+    Uploads a file to the data folder and optionally processes it into ChromaDB.
+    """
+    collection_to_use = collection_name or config.COLLECTION_NAME
+    data_folder_to_use = str(config.DATA_FOLDER)
+    
+    logger.info(f"Received file upload: {file.filename}")
+    
+    # Validate file type
+    allowed_extensions = {'.pdf', '.docx'}
+    file_extension = Path(file.filename).suffix.lower()
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File type {file_extension} not supported. Allowed types: {', '.join(allowed_extensions)}"
+        )
+    
+    try:
+        # Ensure data folder exists
+        os.makedirs(data_folder_to_use, exist_ok=True)
+        
+        # Save uploaded file
+        file_path = Path(data_folder_to_use) / file.filename
+        
+        # Check if file already exists
+        if file_path.exists():
+            raise HTTPException(status_code=409, detail=f"File {file.filename} already exists")
+        
+        # Write file to disk
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        processed = False
+        message = f"File {file.filename} uploaded successfully"
+        
+        # Process immediately if requested
+        if process_immediately:
+            try:
+                num_processed = preprocessing.process_and_store_documents(
+                    data_folder=data_folder_to_use,
+                    collection_name=collection_to_use,
+                    persist_dir=str(config.PERSIST_DIR)
+                )
+                processed = True
+                message = f"File {file.filename} uploaded and processed successfully"
+            except Exception as e:
+                logger.error(f"Failed to process uploaded file {file.filename}: {e}")
+                message = f"File {file.filename} uploaded but processing failed: {str(e)}"
+        
+        return models.FileUploadResponse(
+            message=message,
+            filename=file.filename,
+            processed=processed
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to upload file {file.filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+
+
+@app.delete("/delete_file",
+           response_model=models.FileDeleteResponse,
+           summary="Delete File",
+           description="Removes a file from both the file system and the vector store.")
+async def delete_file(request: models.FileDeleteRequest):
+    """
+    Deletes a file from the data folder and removes its embeddings from ChromaDB.
+    """
+    collection_to_use = request.collection_name or config.COLLECTION_NAME
+    data_folder_to_use = str(config.DATA_FOLDER)
+    persist_dir_to_use = str(config.PERSIST_DIR)
+    
+    logger.info(f"Received delete request for file: {request.filename}")
+    
+    try:
+        deleted = False
+        
+        # Remove from file system
+        file_path = Path(data_folder_to_use) / request.filename
+        if file_path.exists():
+            file_path.unlink()
+            logger.info(f"Deleted file from filesystem: {request.filename}")
+        
+        # Remove from vector store
+        try:
+            db = chromadb.PersistentClient(path=persist_dir_to_use)
+            collections = db.list_collections()
+            collection_names = {col.name for col in collections}
+            
+            if collection_to_use in collection_names:
+                collection = db.get_collection(name=collection_to_use)
+                
+                # Get all documents with this filename
+                results = collection.get(
+                    where={"file_name": request.filename}
+                )
+                
+                if results and results['ids']:
+                    # Delete all chunks for this file
+                    collection.delete(ids=results['ids'])
+                    deleted = True
+                    logger.info(f"Deleted {len(results['ids'])} chunks for file {request.filename} from vector store")
+                else:
+                    logger.info(f"No chunks found for file {request.filename} in vector store")
+            
+        except Exception as e:
+            logger.error(f"Error removing {request.filename} from vector store: {e}")
+        
+        return models.FileDeleteResponse(
+            message=f"File {request.filename} deleted successfully" if deleted else f"File {request.filename} not found in vector store",
+            filename=request.filename,
+            deleted=deleted
+        )
+        
+    except Exception as e:
+        logger.exception(f"Failed to delete file {request.filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"File deletion failed: {str(e)}")

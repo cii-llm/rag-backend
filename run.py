@@ -3,7 +3,7 @@ import os
 
 if __name__ == "__main__":
     # Get host and port from environment variables or use defaults
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "127.0.0.1") # This should be 0.0.0.0 for production
     port = int(os.getenv("PORT", "8000"))
     reload = os.getenv("RELOAD", "true").lower() == "true" # Enable reload for development
 

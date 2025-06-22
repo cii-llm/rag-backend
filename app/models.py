@@ -25,3 +25,17 @@ class ProcessedDocumentsResponse(BaseModel):
     collection_name: str
     processed_filenames: List[str]
     count: int
+
+class FileUploadResponse(BaseModel):
+    message: str
+    filename: str
+    processed: bool
+
+class FileDeleteRequest(BaseModel):
+    filename: str = Field(..., description="Name of the file to delete from the vector store")
+    collection_name: Optional[str] = Field(None, description="Name of the ChromaDB collection. Overrides .env setting.")
+
+class FileDeleteResponse(BaseModel):
+    message: str
+    filename: str
+    deleted: bool
