@@ -22,12 +22,19 @@ class MetadataCitationPostprocessor(BaseNodePostprocessor):
             try:
                 file_name = node.metadata.get("file_name", "Unknown Source")
                 page_label = node.metadata.get("page_label", None) # PDFs often have this
+                product_name = node.metadata.get("product_name", None)
 
-                # Create the citation string
-                citation = f"[Source: {file_name}"
+                # Create the citation string - use product_name if available, otherwise file_name
+                if product_name:
+                    citation = f"{product_name} ({file_name}"
+                else:
+                    citation = f"{file_name}"
+                
                 if page_label:
-                    citation += f", Page: {page_label}"
-                citation += "]"
+                    citation += f"; Page {page_label}"
+                
+                if product_name:
+                    citation += ")"
 
                 # Prepend citation to the node's text for the LLM context
                 # Using a clear separator helps the LLM distinguish context from citation info
