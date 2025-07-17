@@ -75,7 +75,7 @@ def get_processed_filenames(db_client: chromadb.PersistentClient, collection_nam
 
 # Make sure the rest of process_and_store_documents is unchanged from the previous version
 # (setup_global_settings, finding files, filtering new files, loading, storing)
-def process_and_store_documents(data_folder: str, collection_name: str, persist_dir: str) -> int:
+def process_and_store_documents(data_folder: str, collection_name: str, persist_dir: str, document_url: str = None) -> int:
     setup_global_settings() # Ensure embedding model is set
 
     logger.info(f"Starting INCREMENTAL document processing from folder: {data_folder}")
@@ -126,6 +126,13 @@ def process_and_store_documents(data_folder: str, collection_name: str, persist_
             logger.warning(f"Loaded 0 document chunks from the new files list. Check reader compatibility.")
             return 0
         logger.info(f"Loaded {len(documents)} document chunks from {len(new_files_to_process)} new file(s).")
+        
+        # Add URL metadata to each document
+        if document_url:
+            for doc in documents:
+                doc.metadata['document_url'] = document_url
+                logger.debug(f"Added URL metadata to document: {doc.metadata.get('file_name', 'unknown')}")
+        
     except Exception as e:
         logger.error(f"Error loading new documents: {e}", exc_info=True)
         raise
@@ -147,3 +154,53 @@ def process_and_store_documents(data_folder: str, collection_name: str, persist_
     logger.info(f"Successfully added {len(documents)} chunks from new documents to collection '{collection_name}'.")
 
     return len(documents)
+
+
+def update_existing_documents_with_urls(collection_name: str, persist_dir: str, default_url: str = "https://www.construction-institute.org/") -> int:
+    """
+    Update existing documents in ChromaDB with default URL metadata.
+    """
+    logger.info(f"Updating existing documents in collection '{collection_name}' with default URL: {default_url}")
+    
+    # Initialize ChromaDB client
+    db = chromadb.PersistentClient(path=persist_dir)
+    
+    try:
+        # Get the collection
+        collection = db.get_collection(name=collection_name)
+        logger.info(f"Successfully accessed collection '{collection_name}'")
+        
+        # Get all documents
+        results = collection.get(include=['metadatas', 'documents'])
+        
+        if not results or not results.get('ids'):
+            logger.warning(f"No documents found in collection '{collection_name}'")
+            return 0
+            
+        ids = results['ids']
+        metadatas = results['metadatas']
+        documents = results['documents']
+        
+        # Update metadata for documents that don't have URL
+        updated_count = 0
+        for i, metadata in enumerate(metadatas):
+            if metadata and 'document_url' not in metadata:
+                # Update metadata with default URL
+                metadata['document_url'] = default_url
+                updated_count += 1
+        
+        if updated_count > 0:
+            # Update the collection with new metadata (don't include embeddings)
+            collection.update(
+                ids=ids,
+                metadatas=metadatas
+            )
+            logger.info(f"Updated {updated_count} documents with default URL")
+        else:
+            logger.info("All documents already have URL metadata")
+            
+        return updated_count
+        
+    except Exception as e:
+        logger.error(f"Error updating documents with URLs: {e}", exc_info=True)
+        raise

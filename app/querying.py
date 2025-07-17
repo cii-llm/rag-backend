@@ -135,17 +135,23 @@ def answer_query(query_text: str, collection_name: str, persist_dir: str) -> dic
         answer = str(response)
         source_nodes_count = len(response.source_nodes)
 
-        # Optional: You could also return the raw source nodes metadata if needed
-        # source_details = [
-        #     {"text": node.node.get_content(), "metadata": node.node.metadata}
-        #     for node in response.source_nodes
-        # ]
+        # Extract source information including URLs
+        from .models import SourceInfo
+        sources = []
+        for node in response.source_nodes:
+            metadata = node.node.metadata
+            source_info = SourceInfo(
+                file_name=metadata.get('file_name', 'Unknown'),
+                page_label=metadata.get('page_label', 'Unknown'),
+                document_url=metadata.get('document_url', 'https://www.construction-institute.org/')
+            )
+            sources.append(source_info)
 
         return {
             "query": query_text,
             "answer": answer, # This answer string should have inline citations
-            "source_nodes_count": source_nodes_count
-            # "source_details": source_details # Uncomment if you want raw sources too
+            "source_nodes_count": source_nodes_count,
+            "sources": sources
         }
     except ValueError as ve:
         logger.error(f"Query failed: {ve}")

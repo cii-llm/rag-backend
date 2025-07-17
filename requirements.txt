@@ -10,3 +10,11 @@ chromadb>=0.4.22 # Use a compatible version
 pypdf # Dependency for PDF reader
 openpyxl # Dependency for XLSX reader
 pandas # Dependency for XLSX reader
+
+# Authentication and Database Dependencies
+PyJWT==2.8.0
+python-multipart==0.0.6
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.13.1
+python-jose[cryptography]==3.3.0

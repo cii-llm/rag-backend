@@ -1,5 +1,16 @@
 # Nginx Steps:
 
+0. Set up CSR
+```
+sudo mkdir -p /etc/ssl/private
+cd /etc/ssl/private
+sudo openssl req -new -newkey rsa:2048 -nodes -keyout dev-chat.construction-institute.org.key -out dev-chat.construction-institute.org.csr
+```
+
+sudo chmod 600 dev-chat.construction-institute.org.key
+sudo chmod 644 dev-chat.construction-institute.org.csr
+cat dev-chat.construction-institute.org.csr
+
 1. Upload Frontend Build Files:
 
     Copy the entire contents of your local rag-frontend/dist folder to the chosen directory on your server (e.g., /var/www/rag-frontend/dist). You can use tools like scp or rsync.

@@ -4,9 +4,16 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from typing import List
+from uuid import UUID
+from datetime import datetime
+from sqlalchemy.orm import Session
 from fastapi import FastAPI, HTTPException, Body, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from . import config, preprocessing, querying, models # Relative imports
+from .auth import get_current_user, get_current_user_optional
+from .chat_history import ChatHistoryService
+from .database import get_db, init_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,6 +25,9 @@ app = FastAPI(
     description="API for preprocessing documents and querying them using a RAG pipeline.",
     version="1.0.0",
 )
+
+# Initialize database
+init_db()
 
 # --- CORS Configuration ---
 # Define the list of origins allowed to connect (your Vue frontend)
@@ -60,7 +70,7 @@ class CommonParams:
           response_model=models.PreprocessResponse,
           summary="Preprocess Documents",
           description="Loads PDF and XLSX files from a specified folder, processes them, and stores embeddings in ChromaDB.")
-async def preprocess_endpoint(request: models.PreprocessRequest = Body(None)):
+async def preprocess_endpoint(request: models.PreprocessRequest = Body(None), current_user: dict = Depends(get_current_user)):
     """
     Initiates the document preprocessing pipeline.
     Uses configuration from .env file, which can be optionally overridden in the request body.
@@ -102,7 +112,7 @@ async def preprocess_endpoint(request: models.PreprocessRequest = Body(None)):
           response_model=models.QueryResponse,
           summary="Query Documents",
           description="Sends a query to the RAG system, retrieves relevant context from ChromaDB, and generates an answer using GPT-4.")
-async def query_endpoint(request: models.QueryRequest):
+async def query_endpoint(request: models.QueryRequest, current_user: dict = Depends(get_current_user)):
     """
     Queries the indexed documents.
     Uses configuration from .env file, collection name can be overridden.
@@ -131,14 +141,14 @@ async def query_endpoint(request: models.QueryRequest):
 
 @app.get("/", summary="Health Check", description="Basic health check endpoint.")
 async def root():
-    return {"status": "ok", "message": "RAG API is running"}
+    return {"status": "ok", "message": "RAG API is running", "auth_mode": "mock" if os.getenv("MOCK_AUTH_MODE", "").lower() == "true" else "production"}
 
 
 @app.get("/processed_documents",
          response_model=models.ProcessedDocumentsResponse,
          summary="List Processed Documents",
          description="Retrieves a list of unique source filenames stored in the specified ChromaDB collection.")
-async def get_processed_documents(collection_name: str | None = None):
+async def get_processed_documents(collection_name: str | None = None, current_user: dict = Depends(get_current_user)):
     """
     Queries ChromaDB to find unique source filenames that have been processed.
     Uses db.list_collections() to check for existence first.
@@ -214,7 +224,9 @@ async def get_processed_documents(collection_name: str | None = None):
 async def upload_file(
     file: UploadFile = File(...),
     process_immediately: bool = True,
-    collection_name: str | None = None
+    collection_name: str | None = None,
+    document_url: str | None = None,
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Uploads a file to the data folder and optionally processes it into ChromaDB.
@@ -254,10 +266,13 @@ async def upload_file(
         # Process immediately if requested
         if process_immediately:
             try:
+                # Use provided URL or default
+                url_to_use = document_url or "https://www.construction-institute.org/"
                 num_processed = preprocessing.process_and_store_documents(
                     data_folder=data_folder_to_use,
                     collection_name=collection_to_use,
-                    persist_dir=str(config.PERSIST_DIR)
+                    persist_dir=str(config.PERSIST_DIR),
+                    document_url=url_to_use
                 )
                 processed = True
                 message = f"File {file.filename} uploaded and processed successfully"
@@ -282,7 +297,7 @@ async def upload_file(
            response_model=models.FileDeleteResponse,
            summary="Delete File",
            description="Removes a file from both the file system and the vector store.")
-async def delete_file(request: models.FileDeleteRequest):
+async def delete_file(request: models.FileDeleteRequest, current_user: dict = Depends(get_current_user)):
     """
     Deletes a file from the data folder and removes its embeddings from ChromaDB.
     """
@@ -335,3 +350,356 @@ async def delete_file(request: models.FileDeleteRequest):
     except Exception as e:
         logger.exception(f"Failed to delete file {request.filename}: {e}")
         raise HTTPException(status_code=500, detail=f"File deletion failed: {str(e)}")
+
+
+@app.post("/update_document_urls",
+          summary="Update Document URLs",
+          description="Updates existing documents in the vector store with default URL metadata.")
+async def update_document_urls(
+    collection_name: str | None = None,
+    default_url: str = "https://www.construction-institute.org/",
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Updates existing documents in ChromaDB with default URL metadata.
+    """
+    collection_to_use = collection_name or config.COLLECTION_NAME
+    persist_dir_to_use = str(config.PERSIST_DIR)
+    
+    logger.info(f"Received request to update document URLs in collection: {collection_to_use}")
+    
+    try:
+        updated_count = preprocessing.update_existing_documents_with_urls(
+            collection_name=collection_to_use,
+            persist_dir=persist_dir_to_use,
+            default_url=default_url
+        )
+        
+        return {
+            "message": f"Successfully updated {updated_count} documents with URL metadata",
+            "collection_name": collection_to_use,
+            "default_url": default_url,
+            "updated_count": updated_count
+        }
+        
+    except Exception as e:
+        logger.exception(f"Failed to update document URLs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update document URLs: {str(e)}")
+
+
+# --- Authentication and Chat History Endpoints ---
+
+@app.get("/me", 
+         response_model=models.UserResponse,
+         summary="Get Current User",
+         description="Get information about the currently authenticated user.")
+async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    """Get current user information"""
+    return models.UserResponse(
+        id=current_user["id"],
+        username=current_user["username"],
+        email=current_user["email"],
+        first_name=current_user.get("first_name"),
+        last_name=current_user.get("last_name"),
+        created_at=current_user.get("created_at", datetime.utcnow()),
+        last_login=current_user.get("last_login")
+    )
+
+
+# Chat Session Endpoints
+@app.post("/chat/sessions", 
+          response_model=models.ChatSessionResponse,
+          summary="Create Chat Session",
+          description="Create a new chat session for the current user.")
+async def create_chat_session(
+    session_data: models.ChatSessionCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new chat session"""
+    chat_service = ChatHistoryService(db)
+    session = chat_service.create_session(
+        user_id=current_user["id"],
+        title=session_data.title
+    )
+    return models.ChatSessionResponse(
+        id=session.id,
+        title=session.title,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        is_archived=session.is_archived,
+        message_count=0
+    )
+
+
+@app.get("/chat/sessions", 
+         response_model=List[models.ChatSessionResponse],
+         summary="List Chat Sessions",
+         description="Get all chat sessions for the current user.")
+async def get_chat_sessions(
+    include_archived: bool = False,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all chat sessions for the current user"""
+    chat_service = ChatHistoryService(db)
+    sessions = chat_service.get_user_sessions(current_user["id"], include_archived)
+    
+    # Add message count to each session
+    result = []
+    for session in sessions:
+        message_count = chat_service.get_session_message_count(session.id, current_user["id"])
+        result.append(models.ChatSessionResponse(
+            id=session.id,
+            title=session.title,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            is_archived=session.is_archived,
+            message_count=message_count
+        ))
+    
+    return result
+
+
+@app.get("/chat/sessions/{session_id}", 
+         response_model=models.ChatSessionWithMessages,
+         summary="Get Chat Session",
+         description="Get a specific chat session with all its messages.")
+async def get_chat_session(
+    session_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a specific chat session with messages"""
+    chat_service = ChatHistoryService(db)
+    
+    # Get session
+    session = chat_service.get_session(session_id, current_user["id"])
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get messages
+    messages = chat_service.get_session_messages(session_id, current_user["id"])
+    
+    return models.ChatSessionWithMessages(
+        session=models.ChatSessionResponse(
+            id=session.id,
+            title=session.title,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            is_archived=session.is_archived,
+            message_count=len(messages)
+        ),
+        messages=[
+            models.ChatMessageResponse(
+                id=msg.id,
+                session_id=msg.session_id,
+                message_type=msg.message_type,
+                content=msg.content,
+                metadata=msg.message_metadata,
+                created_at=msg.created_at
+            )
+            for msg in messages
+        ]
+    )
+
+
+@app.get("/chat/sessions/{session_id}/messages", 
+         response_model=List[models.ChatMessageResponse],
+         summary="Get Session Messages",
+         description="Get all messages for a specific chat session.")
+async def get_session_messages(
+    session_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a specific chat session"""
+    chat_service = ChatHistoryService(db)
+    messages = chat_service.get_session_messages(session_id, current_user["id"])
+    
+    return [
+        models.ChatMessageResponse(
+            id=msg.id,
+            session_id=msg.session_id,
+            message_type=msg.message_type,
+            content=msg.content,
+            metadata=msg.message_metadata,
+            created_at=msg.created_at
+        )
+        for msg in messages
+    ]
+
+
+@app.put("/chat/sessions/{session_id}", 
+         response_model=models.ChatSessionResponse,
+         summary="Update Chat Session",
+         description="Update a chat session's title or archive status.")
+async def update_chat_session(
+    session_id: UUID,
+    session_update: models.ChatSessionUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update a chat session"""
+    chat_service = ChatHistoryService(db)
+    
+    # Get session to ensure it exists and user owns it
+    session = chat_service.get_session(session_id, current_user["id"])
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Update title if provided
+    if session_update.title is not None:
+        chat_service.update_session_title(session_id, current_user["id"], session_update.title)
+    
+    # Update archive status if provided
+    if session_update.is_archived is not None:
+        if session_update.is_archived:
+            chat_service.archive_session(session_id, current_user["id"])
+        else:
+            chat_service.unarchive_session(session_id, current_user["id"])
+    
+    # Get updated session
+    updated_session = chat_service.get_session(session_id, current_user["id"])
+    message_count = chat_service.get_session_message_count(session_id, current_user["id"])
+    
+    return models.ChatSessionResponse(
+        id=updated_session.id,
+        title=updated_session.title,
+        created_at=updated_session.created_at,
+        updated_at=updated_session.updated_at,
+        is_archived=updated_session.is_archived,
+        message_count=message_count
+    )
+
+
+@app.post("/chat/sessions/{session_id}/archive",
+          summary="Archive Chat Session",
+          description="Archive a chat session.")
+async def archive_chat_session(
+    session_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Archive a chat session"""
+    chat_service = ChatHistoryService(db)
+    success = chat_service.archive_session(session_id, current_user["id"])
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {"message": "Session archived successfully"}
+
+
+@app.delete("/chat/sessions/{session_id}",
+            summary="Delete Chat Session",
+            description="Delete a chat session and all its messages.")
+async def delete_chat_session(
+    session_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a chat session"""
+    chat_service = ChatHistoryService(db)
+    success = chat_service.delete_session(session_id, current_user["id"])
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {"message": "Session deleted successfully"}
+
+
+# Enhanced Query Endpoint with Chat History
+@app.post("/query_with_session", 
+          response_model=models.QueryWithSessionResponse,
+          summary="Query with Session",
+          description="Query documents and save the conversation to chat history.")
+async def query_with_session(
+    request: models.QueryWithSessionRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Query documents and save to chat history"""
+    chat_service = ChatHistoryService(db)
+    
+    # Create new session if none provided
+    if not request.session_id:
+        session = chat_service.create_session(current_user["id"])
+        session_id = session.id
+    else:
+        session_id = request.session_id
+        # Verify user owns this session
+        if not chat_service.get_session(session_id, current_user["id"]):
+            raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Save user message
+    chat_service.save_message(
+        session_id=session_id,
+        message_type="user",
+        content=request.query
+    )
+    
+    try:
+        # Perform the actual query (existing logic)
+        collection_name = request.collection_name or config.COLLECTION_NAME
+        result = querying.answer_query(
+            query_text=request.query,
+            collection_name=collection_name,
+            persist_dir=str(config.PERSIST_DIR)
+        )
+        
+        # Convert SourceInfo objects to dictionaries for JSON serialization
+        sources_dict = []
+        if result.get("sources"):
+            for source in result["sources"]:
+                if hasattr(source, 'dict'):
+                    sources_dict.append(source.dict())
+                else:
+                    sources_dict.append(source)
+        
+        # Save assistant response
+        chat_service.save_message(
+            session_id=session_id,
+            message_type="assistant",
+            content=result["answer"],
+            metadata={
+                "sources": sources_dict,
+                "collection_name": collection_name,
+                "source_nodes_count": result.get("source_nodes_count", 0)
+            }
+        )
+        
+        # Return response with session ID
+        return models.QueryWithSessionResponse(
+            query=request.query,
+            answer=result["answer"],
+            source_nodes_count=result.get("source_nodes_count", 0),
+            session_id=session_id,
+            sources=result.get("sources", [])
+        )
+        
+    except Exception as e:
+        logger.exception(f"Failed to query documents: {e}")
+        # Save error message
+        chat_service.save_message(
+            session_id=session_id,
+            message_type="assistant",
+            content=f"Sorry, I encountered an error: {str(e)}",
+            metadata={"error": True, "error_message": str(e)}
+        )
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+@app.get("/chat/stats",
+         response_model=models.UserStatsResponse,
+         summary="Get Chat Statistics",
+         description="Get chat statistics for the current user.")
+async def get_chat_stats(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get user chat statistics"""
+    chat_service = ChatHistoryService(db)
+    stats = chat_service.get_user_stats(current_user["id"])
+    
+    return models.UserStatsResponse(**stats)
