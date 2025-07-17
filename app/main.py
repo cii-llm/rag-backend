@@ -648,10 +648,39 @@ async def query_with_session(
     )
     
     try:
+        # Get chat history for context
+        chat_history = chat_service.get_session_messages(session_id, current_user["id"])
+        
+        # Build context from previous messages (last 10 messages or last 4000 chars)
+        context_messages = []
+        char_count = 0
+        max_context_chars = 4000  # Increase context window
+        
+        # Get recent messages (excluding the one we just saved)
+        for message in reversed(chat_history[:-1]):  # Skip the last message (current user message)
+            if len(context_messages) >= 10:  # Limit to last 10 messages
+                break
+            if char_count + len(message.content) > max_context_chars:
+                break
+            context_messages.insert(0, message)
+            char_count += len(message.content)
+        
+        # Format context for the query
+        context_str = ""
+        if context_messages:
+            context_str = "\n\nPrevious conversation context:\n"
+            for msg in context_messages:
+                role = "Human" if msg.message_type == "user" else "Assistant"
+                context_str += f"{role}: {msg.content}\n"
+            context_str += f"\nCurrent question: {request.query}"
+        
+        # Use context-aware query
+        query_with_context = f"{context_str}\n\nQuestion: {request.query}" if context_str else request.query
+        
         # Perform the actual query (existing logic)
         collection_name = request.collection_name or config.COLLECTION_NAME
         result = querying.answer_query(
-            query_text=request.query,
+            query_text=query_with_context,
             collection_name=collection_name,
             persist_dir=str(config.PERSIST_DIR)
         )

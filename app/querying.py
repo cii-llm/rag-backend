@@ -34,6 +34,8 @@ QA_TEMPLATE_STR = (
     "2. Do not use any prior knowledge or information outside the provided context.\n"
     "3. When you use information from a specific source, cite it clearly in your answer. For example: 'According to [Source: filename, Page: page_number], the value is X.' or 'The process involves Y [Source: filename, Page: page_number].'\n"
     "4. If the context does not contain information to answer the question, state that clearly.\n"
+    "5. If the question includes previous conversation context, use it to understand the follow-up question better, but still base your answer on the document context provided.\n"
+    "6. For follow-up questions, acknowledge the previous conversation when relevant and provide a coherent response that builds on the previous discussion.\n"
     "Answer: "
 )
 QA_TEMPLATE = PromptTemplate(QA_TEMPLATE_STR)
@@ -111,7 +113,7 @@ def get_query_engine(collection_name: str, persist_dir: str):
         refine_template=REFINE_TEMPLATE,
         # Add the node postprocessor to format context before it hits the prompt
         node_postprocessors=[MetadataCitationPostprocessor()],
-        similarity_top_k=3 # Adjust how many nodes to retrieve
+        similarity_top_k=5 # Increase to get more context from documents
     )
     logger.info("Query engine created with custom citation prompts and node postprocessor.")
 
