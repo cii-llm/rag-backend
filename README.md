@@ -106,3 +106,128 @@ Replace the placeholder GitHub URL with your actual repository:
 ```bash
 git remote set-url github git@github.com:yourusername/cii-llm-backend.git
 ```
+
+## Batch Processing Documents with Product Names
+
+This system supports batch processing of documents with product names and URLs from a CSV file. This is useful for processing large numbers of documents with proper metadata.
+
+### 📁 File Structure
+
+```
+rag-backend/
+├── batch_process_csv.py           # Main batch processing script
+├── update_document_metadata.py    # Update existing documents script
+├── cii-urls.csv                   # CSV file with product data
+└── cii-pdfs/                      # Folder with PDF files
+    ├── 272_11.pdf
+    └── 272_12.pdf
+```
+
+### 📋 CSV File Format
+
+Create a `cii-urls.csv` file with the following structure:
+
+```csv
+Product Name,eCopyfile,CII Website URL
+Advanced Work Packaging Implementation Guide,272_12.pdf,https://www.construction-institute.org/resources/knowledgebase/best-practices/advanced-work-packaging-implementation-guide
+Project Definition Rating Index,272_11.pdf,https://www.construction-institute.org/resources/knowledgebase/best-practices/project-definition-rating-index
+```
+
+### 🚀 Batch Processing Scripts
+
+#### 1. Process New Documents from CSV
+
+```bash
+cd /Users/krishna/dev/cii/rag-backend
+source env/bin/activate
+
+# Process first 2 rows from CSV (for testing)
+python batch_process_csv.py --limit 2
+
+# Process all rows
+python batch_process_csv.py
+
+# Use custom CSV file
+python batch_process_csv.py --csv-file custom-urls.csv
+```
+
+#### 2. Update Existing Documents with Product Names
+
+```bash
+cd /Users/krishna/dev/cii/rag-backend
+source env/bin/activate
+
+# Update metadata for first 2 documents
+python update_document_metadata.py --limit 2
+
+# Update all documents
+python update_document_metadata.py
+
+# Use custom CSV file
+python update_document_metadata.py --csv-file custom-urls.csv
+```
+
+### 🔧 Script Options
+
+#### batch_process_csv.py Options:
+- `--limit N` - Process only first N rows from CSV
+- `--csv-file path` - Use different CSV file (default: cii-urls.csv)
+- `--collection name` - Use different ChromaDB collection
+
+#### update_document_metadata.py Options:
+- `--limit N` - Process only first N rows from CSV
+- `--csv-file path` - Use different CSV file (default: cii-urls.csv)
+- `--collection name` - Use different ChromaDB collection
+
+### 📝 Usage Workflow
+
+1. **Prepare your files:**
+   - Add PDF files to the `cii-pdfs/` folder
+   - Create/update `cii-urls.csv` with product information
+
+2. **For new documents:**
+   ```bash
+   python batch_process_csv.py --limit 2  # Test with first 2 rows
+   ```
+
+3. **For existing documents (add product names):**
+   ```bash
+   python update_document_metadata.py --limit 2  # Test with first 2 rows
+   ```
+
+4. **Process all documents:**
+   ```bash
+   python batch_process_csv.py           # Process all new documents
+   python update_document_metadata.py    # Update all existing documents
+   ```
+
+### 📊 Expected Output
+
+The scripts will show progress like this:
+
+```
+2025-07-16 22:29:11,025 - INFO - Starting CSV batch processing
+2025-07-16 22:29:11,025 - INFO - CSV file: cii-urls.csv
+2025-07-16 22:29:11,025 - INFO - Collection: doc_store_v1
+2025-07-16 22:29:11,025 - INFO - Limit: 2
+2025-07-16 22:29:11,025 - INFO - Read 2 records from CSV file
+2025-07-16 22:29:11,222 - INFO - ✅ Successfully processed: 272_12.pdf (Advanced Work Packaging Implementation Guide)
+2025-07-16 22:29:11,222 - INFO - ✅ Successfully processed: 272_11.pdf (Project Definition Rating Index)
+2025-07-16 22:29:11,321 - INFO - Batch processing complete!
+2025-07-16 22:29:11,321 - INFO - ✅ Processed: 2
+2025-07-16 22:29:11,321 - INFO - ⏭️  Skipped: 0
+2025-07-16 22:29:11,321 - INFO - ❌ Failed: 0
+```
+
+### 🎯 Result
+
+After processing, query responses will show:
+
+```
+Sources:
+📄 Advanced Work Packaging Implementation Guide (Page iii)     [← clickable link]
+📄 Project Definition Rating Index (Page 43)                  [← clickable link]
+📄 Advanced Work Packaging Implementation Guide (Page 105)    [← clickable link]
+```
+
+Each source will be a clickable link that opens the document URL in a new tab, with the product name prominently displayed instead of just the filename.

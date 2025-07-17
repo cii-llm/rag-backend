@@ -18,6 +18,7 @@ class SourceInfo(BaseModel):
     file_name: str
     page_label: str
     document_url: str
+    product_name: Optional[str] = None
 
 class QueryRequest(BaseModel):
     query: str = Field(..., description="The question to ask the RAG system.")

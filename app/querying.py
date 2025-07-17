@@ -143,7 +143,8 @@ def answer_query(query_text: str, collection_name: str, persist_dir: str) -> dic
             source_info = SourceInfo(
                 file_name=metadata.get('file_name', 'Unknown'),
                 page_label=metadata.get('page_label', 'Unknown'),
-                document_url=metadata.get('document_url', 'https://www.construction-institute.org/')
+                document_url=metadata.get('document_url', 'https://www.construction-institute.org/'),
+                product_name=metadata.get('product_name', None)
             )
             sources.append(source_info)
 

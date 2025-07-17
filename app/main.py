@@ -226,6 +226,7 @@ async def upload_file(
     process_immediately: bool = True,
     collection_name: str | None = None,
     document_url: str | None = None,
+    product_name: str | None = None,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -272,7 +273,8 @@ async def upload_file(
                     data_folder=data_folder_to_use,
                     collection_name=collection_to_use,
                     persist_dir=str(config.PERSIST_DIR),
-                    document_url=url_to_use
+                    document_url=url_to_use,
+                    product_name=product_name
                 )
                 processed = True
                 message = f"File {file.filename} uploaded and processed successfully"

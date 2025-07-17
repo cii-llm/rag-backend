@@ -75,7 +75,7 @@ def get_processed_filenames(db_client: chromadb.PersistentClient, collection_nam
 
 # Make sure the rest of process_and_store_documents is unchanged from the previous version
 # (setup_global_settings, finding files, filtering new files, loading, storing)
-def process_and_store_documents(data_folder: str, collection_name: str, persist_dir: str, document_url: str = None) -> int:
+def process_and_store_documents(data_folder: str, collection_name: str, persist_dir: str, document_url: str = None, product_name: str = None) -> int:
     setup_global_settings() # Ensure embedding model is set
 
     logger.info(f"Starting INCREMENTAL document processing from folder: {data_folder}")
@@ -127,11 +127,16 @@ def process_and_store_documents(data_folder: str, collection_name: str, persist_
             return 0
         logger.info(f"Loaded {len(documents)} document chunks from {len(new_files_to_process)} new file(s).")
         
-        # Add URL metadata to each document
+        # Add URL and product name metadata to each document
         if document_url:
             for doc in documents:
                 doc.metadata['document_url'] = document_url
                 logger.debug(f"Added URL metadata to document: {doc.metadata.get('file_name', 'unknown')}")
+        
+        if product_name:
+            for doc in documents:
+                doc.metadata['product_name'] = product_name
+                logger.debug(f"Added product name metadata to document: {doc.metadata.get('file_name', 'unknown')}")
         
     except Exception as e:
         logger.error(f"Error loading new documents: {e}", exc_info=True)
