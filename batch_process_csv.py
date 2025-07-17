@@ -45,7 +45,7 @@ def read_csv_file(csv_file_path: str, limit: Optional[int] = None) -> List[Dict[
     records = []
     
     try:
-        with open(csv_file_path, 'r', encoding='utf-8') as file:
+        with open(csv_file_path, 'r', encoding='utf-8-sig') as file:
             reader = csv.DictReader(file)
             
             for i, row in enumerate(reader):
