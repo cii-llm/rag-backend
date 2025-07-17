@@ -33,10 +33,16 @@ init_db()
 # Define the list of origins allowed to connect (your Vue frontend)
 # IMPORTANT: Use the specific origin in production, '*' is less secure
 origins = [
-    "http://localhost:5173", # Your Vue frontend origin
-    "http://127.0.0.1:5173", # Sometimes needed depending on browser/OS
-    # Add your deployed frontend URL here later if applicable
-    # e.g., "https://your-frontend-domain.com"
+    "http://localhost:5173",    # Your Vue frontend development origin
+    "http://127.0.0.1:5173",    # Sometimes needed depending on browser/OS
+    "http://localhost:80",      # nginx default port
+    "http://localhost:8080",    # Common nginx port
+    "http://localhost:3000",    # Alternative nginx port
+    "http://127.0.0.1:80",      # nginx localhost
+    "http://127.0.0.1:8080",    # nginx localhost alternative
+    "http://127.0.0.1:3000",    # nginx localhost alternative
+    # Add your production domain here when deployed
+    # e.g., "https://your-domain.com", "https://cii-rag.your-domain.com"
 ]
 
 app.add_middleware(
