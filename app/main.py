@@ -650,34 +650,56 @@ async def query_with_session(
     )
     
     try:
+        # Check if this is a topic change by looking for key industry terms
+        topic_keywords = ['AWP', 'PDRI', 'FEP', 'modular', 'constructability', 'benchmarking', 'safety', 'risk', 'scheduling', 'procurement']
+        current_query_lower = request.query.lower()
+        
         # Get chat history for context
         chat_history = chat_service.get_session_messages(session_id, current_user["id"])
         
-        # Build context from previous messages (last 10 messages or last 4000 chars)
-        context_messages = []
-        char_count = 0
-        max_context_chars = 4000  # Increase context window
+        # Determine if we should use context or treat as new topic
+        use_context = False
+        if chat_history and len(chat_history) > 1:
+            # Check if current query contains specific topic keywords that differ from recent messages
+            recent_messages = chat_history[-3:]  # Look at last 3 messages
+            recent_content = " ".join([msg.content.lower() for msg in recent_messages])
+            
+            # Use context only if query seems to be a follow-up (pronouns, "this", "that", etc.)
+            followup_indicators = ['this', 'that', 'it', 'these', 'those', 'how', 'why', 'what about', 'can you', 'tell me more']
+            has_followup_indicators = any(indicator in current_query_lower for indicator in followup_indicators)
+            
+            # Check if query contains new topic keywords not in recent messages
+            new_topics = [keyword for keyword in topic_keywords if keyword.lower() in current_query_lower and keyword.lower() not in recent_content]
+            
+            # Use context if it's a clear follow-up and no new topics introduced
+            use_context = has_followup_indicators and len(new_topics) == 0
         
-        # Get recent messages (excluding the one we just saved)
-        for message in reversed(chat_history[:-1]):  # Skip the last message (current user message)
-            if len(context_messages) >= 10:  # Limit to last 10 messages
-                break
-            if char_count + len(message.content) > max_context_chars:
-                break
-            context_messages.insert(0, message)
-            char_count += len(message.content)
-        
-        # Format context for the query
-        context_str = ""
-        if context_messages:
+        # Build context only if this appears to be a follow-up question
+        if use_context:
+            context_messages = []
+            char_count = 0
+            max_context_chars = 2000  # Reduced context window
+            
+            # Get recent messages (excluding the one we just saved)
+            for message in reversed(chat_history[:-1]):  # Skip the last message (current user message)
+                if len(context_messages) >= 4:  # Limit to last 4 messages
+                    break
+                if char_count + len(message.content) > max_context_chars:
+                    break
+                context_messages.insert(0, message)
+                char_count += len(message.content)
+            
+            # Format context for the query
             context_str = "\n\nPrevious conversation context:\n"
             for msg in context_messages:
                 role = "Human" if msg.message_type == "user" else "Assistant"
                 context_str += f"{role}: {msg.content}\n"
             context_str += f"\nCurrent question: {request.query}"
-        
-        # Use context-aware query
-        query_with_context = f"{context_str}\n\nQuestion: {request.query}" if context_str else request.query
+            
+            query_with_context = f"{context_str}\n\nQuestion: {request.query}"
+        else:
+            # Treat as new topic - use only the current query
+            query_with_context = request.query
         
         # Perform the actual query (existing logic)
         collection_name = request.collection_name or config.COLLECTION_NAME
