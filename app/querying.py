@@ -12,9 +12,56 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from . import config
 # Import the custom node postprocessor
 from .node_processing import MetadataCitationPostprocessor
+from .database import get_db, SystemPrompt
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# --- System Prompt Management ---
+
+def get_active_system_prompts():
+    """Get the currently active system prompts from the database"""
+    db = next(get_db())
+    try:
+        # Get active QA template
+        qa_prompt = db.query(SystemPrompt).filter(
+            SystemPrompt.name == 'qa_template',
+            SystemPrompt.is_active == True
+        ).first()
+        
+        # Get active refine template
+        refine_prompt = db.query(SystemPrompt).filter(
+            SystemPrompt.name == 'refine_template',
+            SystemPrompt.is_active == True
+        ).first()
+        
+        # Example: Get active summarize template (if you want to add this)
+        # summarize_prompt = db.query(SystemPrompt).filter(
+        #     SystemPrompt.name == 'summarize_template',
+        #     SystemPrompt.is_active == True
+        # ).first()
+        
+        # If no active prompts found, fall back to default hardcoded ones
+        if not qa_prompt:
+            logger.warning("No active QA template found in database, using fallback")
+            qa_content = QA_TEMPLATE_STR  # Fallback to hardcoded
+        else:
+            qa_content = qa_prompt.content
+            
+        if not refine_prompt:
+            logger.warning("No active refine template found in database, using fallback")
+            refine_content = REFINE_TEMPLATE_STR  # Fallback to hardcoded
+        else:
+            refine_content = refine_prompt.content
+            
+        return qa_content, refine_content
+        
+    except Exception as e:
+        logger.error(f"Error fetching system prompts from database: {e}")
+        # Fall back to hardcoded templates
+        return QA_TEMPLATE_STR, REFINE_TEMPLATE_STR
+    finally:
+        db.close()
 
 # --- Custom Prompt Templates ---
 
@@ -125,12 +172,19 @@ def get_query_engine(collection_name: str, persist_dir: str):
     )
     logger.info("Index loaded successfully.")
 
-    # Create the query engine WITH the custom prompts and node postprocessor
+    # Get active system prompts from database
+    qa_content, refine_content = get_active_system_prompts()
+    
+    # Create prompt templates from database content
+    qa_template = PromptTemplate(qa_content)
+    refine_template = PromptTemplate(refine_content)
+    
+    # Create the query engine WITH the database prompts and node postprocessor
     query_engine = index.as_query_engine(
         response_mode="compact", # 'compact' or 'refine' often work well with citations
-        # Use the custom prompt templates
-        text_qa_template=QA_TEMPLATE,
-        refine_template=REFINE_TEMPLATE,
+        # Use the database prompt templates
+        text_qa_template=qa_template,
+        refine_template=refine_template,
         # Add the node postprocessor to format context before it hits the prompt
         node_postprocessors=[MetadataCitationPostprocessor()],
         similarity_top_k=5 # Reduced from 8 to improve response speed

@@ -136,3 +136,67 @@ class MessageReactionResponse(BaseModel):
     message_id: int
     reaction: Optional[str]
     message: str
+
+# System Prompt Models
+class SystemPromptCreate(BaseModel):
+    name: str = Field(..., description="Unique name for the prompt (e.g., 'qa_template')")
+    content: str = Field(..., description="The actual prompt text")
+    description: Optional[str] = Field(None, description="Description of what this prompt does")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "qa_template",
+                "content": "You are a helpful assistant...",
+                "description": "Main Q&A template for answering user questions"
+            }
+        }
+
+class SystemPromptUpdate(BaseModel):
+    content: Optional[str] = Field(None, description="Updated prompt text")
+    description: Optional[str] = Field(None, description="Updated description")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "content": "You are an expert consultant...",
+                "description": "Updated main Q&A template"
+            }
+        }
+
+class SystemPromptResponse(BaseModel):
+    id: int
+    name: str
+    content: str
+    version: int
+    is_active: bool
+    description: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[int]
+    
+    class Config:
+        from_attributes = True
+        schema_extra = {
+            "example": {
+                "id": 1,
+                "name": "qa_template",
+                "content": "You are a helpful assistant...",
+                "version": 1,
+                "is_active": True,
+                "description": "Main Q&A template",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-01T00:00:00Z",
+                "created_by": 1
+            }
+        }
+
+class SystemPromptActivateRequest(BaseModel):
+    version: int = Field(..., description="Version number to activate")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "version": 2
+            }
+        }

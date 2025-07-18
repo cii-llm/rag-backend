@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, SmallInteger
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, SmallInteger, UniqueConstraint, CheckConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSON as PG_JSON
@@ -149,6 +149,28 @@ class UserDocumentAccess(Base):
     
     # Relationships
     user = relationship("User")
+
+class SystemPrompt(Base):
+    __tablename__ = "system_prompts"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)  # e.g., 'qa_template', 'refine_template'
+    content = Column(Text, nullable=False)  # The actual prompt text
+    version = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=False)
+    description = Column(Text)  # Optional description of what this prompt does
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("users.id"))  # Reference to users table
+    
+    # Relationships
+    creator = relationship("User")
+    
+    # Ensure unique name-version combinations
+    __table_args__ = (
+        UniqueConstraint('name', 'version', name='unique_name_version'),
+        CheckConstraint('version > 0', name='positive_version'),
+    )
 
 def get_db():
     """Database dependency for FastAPI"""

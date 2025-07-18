@@ -4,10 +4,11 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from fastapi import FastAPI, HTTPException, Body, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from . import config, preprocessing, querying, models # Relative imports
@@ -794,3 +795,204 @@ async def set_message_reaction(
         reaction=reaction_request.reaction,
         message="Reaction updated successfully"
     )
+
+
+# System Prompt Management Endpoints
+
+@app.get("/admin/system-prompts", 
+         response_model=List[models.SystemPromptResponse],
+         summary="List System Prompts",
+         description="Get all system prompts with version history.")
+async def list_system_prompts(
+    name: Optional[str] = None,
+    active_only: bool = False,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List all system prompts with optional filtering"""
+    from .database import SystemPrompt
+    
+    query = db.query(SystemPrompt)
+    
+    if name:
+        query = query.filter(SystemPrompt.name == name)
+    if active_only:
+        query = query.filter(SystemPrompt.is_active == True)
+    
+    prompts = query.order_by(SystemPrompt.name, SystemPrompt.version.desc()).all()
+    return prompts
+
+
+@app.post("/admin/system-prompts", 
+          response_model=models.SystemPromptResponse,
+          summary="Create System Prompt",
+          description="Create a new system prompt.")
+async def create_system_prompt(
+    prompt_data: models.SystemPromptCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new system prompt"""
+    from .database import SystemPrompt
+    
+    # Check if a prompt with this name already exists
+    existing = db.query(SystemPrompt).filter(SystemPrompt.name == prompt_data.name).first()
+    if existing:
+        # Create new version
+        max_version = db.query(func.max(SystemPrompt.version)).filter(
+            SystemPrompt.name == prompt_data.name
+        ).scalar() or 0
+        version = max_version + 1
+    else:
+        version = 1
+    
+    # Create new prompt
+    new_prompt = SystemPrompt(
+        name=prompt_data.name,
+        content=prompt_data.content,
+        version=version,
+        is_active=False,  # New versions start as inactive
+        description=prompt_data.description,
+        created_by=current_user["id"]
+    )
+    
+    db.add(new_prompt)
+    db.commit()
+    db.refresh(new_prompt)
+    
+    return new_prompt
+
+
+@app.put("/admin/system-prompts/{prompt_id}", 
+         response_model=models.SystemPromptResponse,
+         summary="Update System Prompt",
+         description="Update an existing system prompt (creates new version).")
+async def update_system_prompt(
+    prompt_id: int,
+    prompt_data: models.SystemPromptUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update a system prompt by creating a new version"""
+    from .database import SystemPrompt
+    
+    # Get the original prompt
+    original = db.query(SystemPrompt).filter(SystemPrompt.id == prompt_id).first()
+    if not original:
+        raise HTTPException(status_code=404, detail="System prompt not found")
+    
+    # Get the next version number for this prompt name
+    max_version = db.query(func.max(SystemPrompt.version)).filter(
+        SystemPrompt.name == original.name
+    ).scalar()
+    new_version = max_version + 1
+    
+    # Create new version with updated content
+    new_prompt = SystemPrompt(
+        name=original.name,
+        content=prompt_data.content if prompt_data.content is not None else original.content,
+        version=new_version,
+        is_active=False,  # New versions start as inactive
+        description=prompt_data.description if prompt_data.description is not None else original.description,
+        created_by=current_user["id"]
+    )
+    
+    db.add(new_prompt)
+    db.commit()
+    db.refresh(new_prompt)
+    
+    return new_prompt
+
+
+@app.post("/admin/system-prompts/{prompt_name}/activate", 
+          response_model=dict,
+          summary="Activate System Prompt Version",
+          description="Activate a specific version of a system prompt.")
+async def activate_system_prompt(
+    prompt_name: str,
+    activate_data: models.SystemPromptActivateRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Activate a specific version of a system prompt"""
+    from .database import SystemPrompt
+    
+    # Deactivate all versions of this prompt
+    db.query(SystemPrompt).filter(
+        SystemPrompt.name == prompt_name
+    ).update({SystemPrompt.is_active: False})
+    
+    # Activate the specified version
+    target_prompt = db.query(SystemPrompt).filter(
+        SystemPrompt.name == prompt_name,
+        SystemPrompt.version == activate_data.version
+    ).first()
+    
+    if not target_prompt:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"System prompt '{prompt_name}' version {activate_data.version} not found"
+        )
+    
+    target_prompt.is_active = True
+    db.commit()
+    
+    return {
+        "message": f"Activated {prompt_name} version {activate_data.version}",
+        "prompt_name": prompt_name,
+        "version": activate_data.version
+    }
+
+
+@app.get("/admin/system-prompts/{prompt_name}/active", 
+         response_model=models.SystemPromptResponse,
+         summary="Get Active System Prompt",
+         description="Get the currently active version of a system prompt.")
+async def get_active_system_prompt(
+    prompt_name: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get the currently active version of a system prompt"""
+    from .database import SystemPrompt
+    
+    active_prompt = db.query(SystemPrompt).filter(
+        SystemPrompt.name == prompt_name,
+        SystemPrompt.is_active == True
+    ).first()
+    
+    if not active_prompt:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No active version found for system prompt '{prompt_name}'"
+        )
+    
+    return active_prompt
+
+
+@app.delete("/admin/system-prompts/{prompt_id}", 
+            summary="Delete System Prompt Version",
+            description="Delete a specific version of a system prompt.")
+async def delete_system_prompt(
+    prompt_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific version of a system prompt"""
+    from .database import SystemPrompt
+    
+    prompt = db.query(SystemPrompt).filter(SystemPrompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="System prompt not found")
+    
+    # Don't allow deleting the active version
+    if prompt.is_active:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete the active version. Please activate another version first."
+        )
+    
+    db.delete(prompt)
+    db.commit()
+    
+    return {"message": f"System prompt version {prompt.version} deleted successfully"}
