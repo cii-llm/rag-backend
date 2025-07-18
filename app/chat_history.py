@@ -144,6 +144,51 @@ class ChatHistoryService:
             return True
         return False
     
+    def set_message_reaction(self, message_id: int, user_id: int, reaction: str = None) -> bool:
+        """Set or remove a reaction on a message"""
+        # Verify the message belongs to the user
+        message = self.db.query(database.ChatMessage).join(
+            database.ChatSession
+        ).filter(
+            database.ChatMessage.id == message_id,
+            database.ChatSession.user_id == user_id
+        ).first()
+        
+        if message:
+            # Convert string reaction to integer
+            reaction_value = None
+            if reaction == 'thumbs_up':
+                reaction_value = 1
+            elif reaction == 'thumbs_down':
+                reaction_value = -1
+            elif reaction is None:
+                reaction_value = None
+            else:
+                return False  # Invalid reaction
+            
+            message.reaction = reaction_value
+            self.db.commit()
+            return True
+        return False
+    
+    def get_message_reaction(self, message_id: int, user_id: int) -> str:
+        """Get the reaction for a specific message"""
+        message = self.db.query(database.ChatMessage).join(
+            database.ChatSession
+        ).filter(
+            database.ChatMessage.id == message_id,
+            database.ChatSession.user_id == user_id
+        ).first()
+        
+        if message and message.reaction is not None:
+            # Convert integer reaction back to string
+            if message.reaction == 1:
+                return 'thumbs_up'
+            elif message.reaction == -1:
+                return 'thumbs_down'
+        
+        return None
+    
     def get_user_stats(self, user_id: int) -> Dict[str, Any]:
         """Get user statistics"""
         total_sessions = self.db.query(database.ChatSession).filter(

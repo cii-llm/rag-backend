@@ -92,6 +92,7 @@ class ChatMessageResponse(BaseModel):
     message_type: str
     content: str
     metadata: Optional[Dict[str, Any]] = None
+    reaction: Optional[str] = None  # 'thumbs_up', 'thumbs_down', or None
     created_at: datetime
 
 class ChatSessionWithMessages(BaseModel):
@@ -110,6 +111,8 @@ class QueryWithSessionResponse(BaseModel):
     source_nodes_count: int
     session_id: UUID
     sources: Optional[List[SourceInfo]] = None
+    user_message_id: Optional[int] = None  # Database ID of the user message
+    assistant_message_id: Optional[int] = None  # Database ID of the assistant message
 
 # User Statistics
 class UserStatsResponse(BaseModel):
@@ -117,3 +120,19 @@ class UserStatsResponse(BaseModel):
     active_sessions: int
     archived_sessions: int
     total_messages: int
+
+# Message Reaction Models
+class MessageReactionRequest(BaseModel):
+    reaction: Optional[str] = Field(None, description="Reaction type: 'thumbs_up', 'thumbs_down', or null to remove")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "reaction": "thumbs_up"
+            }
+        }
+
+class MessageReactionResponse(BaseModel):
+    message_id: int
+    reaction: Optional[str]
+    message: str

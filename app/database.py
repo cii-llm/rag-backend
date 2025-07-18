@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, SmallInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSON as PG_JSON
@@ -134,6 +134,7 @@ class ChatMessage(Base):
     message_type = Column(String(10), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
     message_metadata = Column(JSON)  # Additional data like tokens, model info, etc.
+    reaction = Column(SmallInteger, nullable=True)  # 1 = thumbs_up, -1 = thumbs_down, None = no reaction
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships

@@ -505,6 +505,7 @@ async def get_chat_session(
                 message_type=msg.message_type,
                 content=msg.content,
                 metadata=msg.message_metadata,
+                reaction='thumbs_up' if msg.reaction == 1 else 'thumbs_down' if msg.reaction == -1 else None,
                 created_at=msg.created_at
             )
             for msg in messages
@@ -532,6 +533,7 @@ async def get_session_messages(
             message_type=msg.message_type,
             content=msg.content,
             metadata=msg.message_metadata,
+            reaction='thumbs_up' if msg.reaction == 1 else 'thumbs_down' if msg.reaction == -1 else None,
             created_at=msg.created_at
         )
         for msg in messages
@@ -641,7 +643,7 @@ async def query_with_session(
             raise HTTPException(status_code=404, detail="Session not found")
     
     # Save user message
-    chat_service.save_message(
+    user_message = chat_service.save_message(
         session_id=session_id,
         message_type="user",
         content=request.query
@@ -695,7 +697,7 @@ async def query_with_session(
                     sources_dict.append(source)
         
         # Save assistant response
-        chat_service.save_message(
+        assistant_message = chat_service.save_message(
             session_id=session_id,
             message_type="assistant",
             content=result["answer"],
@@ -706,13 +708,15 @@ async def query_with_session(
             }
         )
         
-        # Return response with session ID
+        # Return response with session ID and message IDs
         return models.QueryWithSessionResponse(
             query=request.query,
             answer=result["answer"],
             source_nodes_count=result.get("source_nodes_count", 0),
             session_id=session_id,
-            sources=result.get("sources", [])
+            sources=result.get("sources", []),
+            user_message_id=user_message.id,
+            assistant_message_id=assistant_message.id
         )
         
     except Exception as e:
@@ -740,3 +744,31 @@ async def get_chat_stats(
     stats = chat_service.get_user_stats(current_user["id"])
     
     return models.UserStatsResponse(**stats)
+
+
+@app.post("/chat/messages/{message_id}/reaction",
+          response_model=models.MessageReactionResponse,
+          summary="Set Message Reaction",
+          description="Set or remove a thumbs up/down reaction on a message.")
+async def set_message_reaction(
+    message_id: int,
+    reaction_request: models.MessageReactionRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Set or remove a reaction on a message"""
+    chat_service = ChatHistoryService(db)
+    success = chat_service.set_message_reaction(
+        message_id, 
+        current_user["id"], 
+        reaction_request.reaction
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Message not found or invalid reaction")
+    
+    return models.MessageReactionResponse(
+        message_id=message_id,
+        reaction=reaction_request.reaction,
+        message="Reaction updated successfully"
+    )
